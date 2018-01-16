@@ -1,0 +1,9 @@
+<component name="libraryTable">
+  <library name="lucene-queryparser-5.5.4">
+    <CLASSES>
+      <root url="jar://$PROJECT_DIR$/libs/lucene-queryparser-5.5.4.jar!/" />
+    </CLASSES>
+    <JAVADOC />
+    <SOURCES />
+  </library>
+</component>
