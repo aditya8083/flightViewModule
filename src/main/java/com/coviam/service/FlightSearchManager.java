@@ -1,10 +1,12 @@
 package com.coviam.service;
 
 import com.coviam.cache.CachingWrapper;
-import com.coviam.controller.FlightSearchController;
 import com.coviam.entity.FlightSearchRequest;
 import com.coviam.entity.FlightSearchResponse;
+import com.coviam.util.EscapeCharacter;
+import com.coviam.util.FlightConstants;
 import com.coviam.util.RandomGenerator;
+import com.coviam.util.ResponseEntity;
 import org.apache.catalina.servlet4preview.http.HttpServletRequest;
 import org.apache.commons.lang.StringUtils;
 import org.hibernate.Criteria;
@@ -12,71 +14,76 @@ import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.cfg.Configuration;
 import org.hibernate.criterion.Restrictions;
+
 import org.json.JSONArray;
-import org.json.JSONException;
 import org.json.JSONObject;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Calendar;
-import java.util.List;
+import java.util.*;
 
 
 @Service
 public class FlightSearchManager {
 
-    private String FLIGHT_CACHE_SET = "flightCache";
-    private String FLIGHT_SEARCH_COLNAME = "flightSearch";
-    private String SUCCESS = "Success";
-    private String FAILURE = "Failure";
 
-   @Autowired CachingWrapper cachingWrapper;
-   @Autowired RandomGenerator randomGenerator;
+   @Autowired
+   CachingWrapper cachingWrapper;
+   @Autowired
+   RandomGenerator randomGenerator;
+    @Autowired
+    FlightConstants flightConstants;
+    @Autowired
+    EscapeCharacter escapeCharacter;
 
-    public String getAllFlights(HttpServletRequest request) throws JSONException {
-        FlightSearchRequest flightSearchRequest = getFlightSearchRequestParams(request);
+    public String getAllFlights(String origin, String destination, String originDepartDate, String destinationArrivalDate, String adults, String infants, String children, String flightType){
+        FlightSearchRequest flightSearchRequest = getFlightSearchRequestParams(origin, destination, originDepartDate, destinationArrivalDate, adults, infants, children, flightType);
         System.out.println(flightSearchRequest.toString());
         if(flightSearchResponsePresentInCache(flightSearchRequest)){
-            return cachingWrapper.readValue(FLIGHT_CACHE_SET,flightSearchRequest.toString(), FLIGHT_SEARCH_COLNAME);
+            return cachingWrapper.readValue(flightConstants.FLIGHT_CACHE_SET,flightSearchRequest.toString(), flightConstants.FLIGHT_SEARCH_COLNAME);
         }
         JSONObject flightSearchRespObj = new JSONObject();
         JSONArray flightResArr = new JSONArray();
-        List<FlightSearchResponse> flightSearchResponseOneWayList = new ArrayList<FlightSearchResponse>();
+        List<FlightSearchResponse> flightSearchResponseOneWayList = new ArrayList<>();
         int totalPaxCount = getPaxCount(flightSearchRequest);
+        String response =" ";
+        try {
+            SessionFactory sessionFactory = new Configuration().configure().buildSessionFactory();
+            Session session = sessionFactory.openSession();
 
-        SessionFactory sessionFactory = new Configuration().configure().buildSessionFactory();
-        Session session = sessionFactory.openSession();
+            flightSearchResponseOneWayList = getAllOneWayFlights(flightSearchRequest, session);
+            flightResArr.put(flightSearchResponseOneWayList);
 
-        flightSearchResponseOneWayList = getAllOneWayFlights(flightSearchRequest,session);
-        flightResArr.put(0,flightSearchResponseOneWayList);
 
-        if(flightSearchRequest.getFlightType().equalsIgnoreCase("ROUNDTRIP")){
-            List<FlightSearchResponse> flightSearchResponseReturnTripList = new ArrayList<FlightSearchResponse>();
-            flightSearchResponseReturnTripList = getAllReturnTripFlights(flightSearchRequest,session);
-            flightResArr.put(1,flightSearchResponseReturnTripList);
+            if (flightSearchRequest.getFlightType().equalsIgnoreCase("ROUNDTRIP")) {
+                List<FlightSearchResponse> flightSearchResponseReturnTripList = new ArrayList<FlightSearchResponse>();
+                flightSearchResponseReturnTripList = getAllReturnTripFlights(flightSearchRequest, session);
+                flightResArr.put(flightSearchResponseReturnTripList);
+            }
+            session.close();
+            System.out.println("Reached here");
+            flightSearchRespObj.put("search_results", flightResArr);
+            if (flightSearchRespObj.getJSONArray("search_results").getJSONArray(0).length() != 0) {
+                System.out.println("Flight Search response got successfully");
+                response = new JSONObject(new ResponseEntity(flightConstants.SUCCESS_CODE, flightConstants.SUCCESS, randomGenerator.generateRandomString(),
+                        flightConstants.FLIGHT_SEARCH, flightSearchRespObj)).toString();
+                cachingWrapper.writeWithoutCompression(flightConstants.FLIGHT_CACHE_SET, flightSearchRequest.toString(),flightConstants.FLIGHT_SEARCH_COLNAME, escapeCharacter.escapeCharacter(response));
+            }else {
+                response = new JSONObject(new ResponseEntity(flightConstants.FAILURE_CODE, flightConstants.NO_FLIGHT_FOUND_MSG, randomGenerator.generateRandomString(),
+                        flightConstants.FLIGHT_SEARCH, new JSONObject())).toString();
+                System.out.println("Error in Getting Flight Search results");
+            }
+        }catch(Exception e){
+            System.out.println("Exception in Getting Flight Search Details");
+            return escapeCharacter.escapeCharacter(new JSONObject(new ResponseEntity(flightConstants.EXCEPTION_CODE, flightConstants.FAILURE, randomGenerator.generateRandomString(),
+                    flightConstants.FLIGHT_SEARCH,new JSONObject())).toString());
         }
-        session.close();
-        System.out.println("Reached here");
-        flightSearchRespObj.put("result", flightResArr);
-        flightSearchRespObj.put("flightSearchID", randomGenerator.generateRandomString());
-        if(flightSearchRespObj.getJSONArray("result").getJSONArray(0).length() !=0 ){
-            flightSearchRespObj.put("resCode", "200");
-            flightSearchRespObj.put("resMessage", SUCCESS);
-            cachingWrapper.writeWithoutCompression(FLIGHT_CACHE_SET, flightSearchRequest.toString(),FLIGHT_SEARCH_COLNAME, flightSearchRespObj.toString());
-            System.out.println("Flight Search response got successfully");
-            return flightSearchRespObj.toString().replaceAll("\\\\", "");
-        }
-        flightSearchRespObj.put("resCode", "301");
-        flightSearchRespObj.put("resMessage", FAILURE);
-        return flightSearchRespObj.toString().replaceAll("\\\\", "");
+        return escapeCharacter.escapeCharacter(response);
     }
 
     private boolean flightSearchResponsePresentInCache(FlightSearchRequest flightSearchRequest) {
-        if(!StringUtils.isBlank(cachingWrapper.readValue(FLIGHT_CACHE_SET, flightSearchRequest.toString(), FLIGHT_SEARCH_COLNAME))){
+        if(!StringUtils.isBlank(cachingWrapper.readValue(flightConstants.FLIGHT_CACHE_SET, flightSearchRequest.toString(), flightConstants.FLIGHT_SEARCH_COLNAME))){
             return true;
         }
         return false;
@@ -100,8 +107,6 @@ public class FlightSearchManager {
 
     private List<FlightSearchResponse> getAllOneWayFlights(FlightSearchRequest flightSearchRequest, Session session) {
         session.beginTransaction();
-      //  Query query = session.createQuery("from FlightSearchResponse ");
-      //  List<FlightSearchResponse> oneWayResponseList = (List<FlightSearchResponse>)query.list();
        Criteria criteria = session.createCriteria(FlightSearchResponse.class)
                           .add(Restrictions.eq("origin", flightSearchRequest.getOrigin()).ignoreCase())
                           .add(Restrictions.eq("destination", flightSearchRequest.getDestination()).ignoreCase())
@@ -116,18 +121,18 @@ public class FlightSearchManager {
 
     private int getPaxCount(FlightSearchRequest flightSearchRequest) {
       return flightSearchRequest.getAdults() + flightSearchRequest.getChildren() + flightSearchRequest.getInfants();
-      
+
     }
-    private FlightSearchRequest getFlightSearchRequestParams(HttpServletRequest request) {
+    private FlightSearchRequest getFlightSearchRequestParams(String origin, String destination, String originDepartDate, String destinationArrivalDate, String adults, String infants, String children, String flightType) {
         FlightSearchRequest flightSearchRequest = new FlightSearchRequest();
-        flightSearchRequest.setOrigin(request.getParameter("origin"));
-        flightSearchRequest.setDestination(request.getParameter("destination"));
-        flightSearchRequest.setOriginDepartDate(request.getParameter("originDepartDate"));
-        flightSearchRequest.setDestinationArrivalDate(request.getParameter("destinationArrivalDate"));
-        flightSearchRequest.setAdults(Integer.parseInt(request.getParameter("adults")));
-        flightSearchRequest.setChildren(!request.getParameter("infants").isEmpty() ? Integer.parseInt(request.getParameter("infants")) : 0);
-        flightSearchRequest.setInfants(!request.getParameter("children").isEmpty() ? Integer.parseInt(request.getParameter("children")) : 0);
-        flightSearchRequest.setFlightType(request.getParameter("flightType"));
+        flightSearchRequest.setOrigin(origin);
+        flightSearchRequest.setDestination(destination);
+        flightSearchRequest.setOriginDepartDate(originDepartDate);
+        flightSearchRequest.setDestinationArrivalDate(destinationArrivalDate);
+        flightSearchRequest.setAdults(Integer.parseInt(adults));
+        flightSearchRequest.setChildren(!infants.isEmpty() ? Integer.parseInt(infants) : 0);
+        flightSearchRequest.setInfants(!children.isEmpty() ? Integer.parseInt(children) : 0);
+        flightSearchRequest.setFlightType(flightType);
         return flightSearchRequest;
     }
 
@@ -136,15 +141,6 @@ public class FlightSearchManager {
         cal.add(Calendar.DATE, 1);
         SimpleDateFormat formatDate = new SimpleDateFormat("yyyy-MM-dd");
         return formatDate.format(cal.getTime());
-    }
-
-    public void saveFlightSearchResponse(FlightSearchResponse flightSearchResponse) {
-        SessionFactory sessionFactory = new Configuration().configure().buildSessionFactory();
-        Session session = sessionFactory.openSession();
-        session.beginTransaction();
-        session.save(flightSearchResponse);
-        session.getTransaction().commit();
-        session.close();
     }
 
        /* HttpHeaders httpHeaders = new HttpHeaders();

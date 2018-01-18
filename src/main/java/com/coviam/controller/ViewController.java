@@ -19,17 +19,17 @@ public class ViewController {
         return mav;
     }
 
-    @RequestMapping("/getFlightDetail")
-    public ModelAndView getFlightDetail()
-    {
-        ModelAndView mav = new ModelAndView("getFlightDetail", "command", new FlightSearchResponse());
-        return mav;
-    }
-
-
-    @PostMapping("/hello")
+    @RequestMapping("/hello")
     public String sayHello(@RequestParam("name") String name, Model model) {
         model.addAttribute("name", name);
         return "hello";
     }
+
+     /* @RequestMapping("/getFlightDetail")
+    public ModelAndView getFlightDetail()
+    {
+        ModelAndView mav = new ModelAndView("getFlightDetail", "command", new FlightSearchResponse());
+        return mav;
+    }*/
+
 }

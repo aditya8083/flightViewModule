@@ -2,16 +2,23 @@ package com.coviam.controller;
 
 import com.coviam.entity.FlightSearchResponse;
 import com.coviam.service.FlightSearchManager;
-import org.apache.catalina.servlet4preview.http.HttpServletRequest;
-import org.hibernate.Session;
-import org.hibernate.SessionFactory;
-import org.hibernate.cfg.Configuration;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.JsonSyntaxException;
+import org.json.JSONArray;
 import org.json.JSONException;
+import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
 
-@RestController
+import java.util.LinkedHashMap;
+import java.util.LinkedList;
+import java.util.List;
+import java.util.Map;
+
+@Controller
 public class FlightSearchController {
 
     @Autowired
@@ -19,11 +26,74 @@ public class FlightSearchController {
 
 
     @RequestMapping(value = "/flight/search", method = RequestMethod.GET)
-    public String flightSearch(HttpServletRequest request) throws JSONException {
+    public String flightSearch(@RequestParam("origin") String origin, @RequestParam("destination") String destination,
+                               @RequestParam("originDepartDate") String originDepartDate, @RequestParam("destinationArrivalDate") String destinationArrivalDate,
+                               @RequestParam("adults") String adults, @RequestParam("infants") String infants,
+                               @RequestParam("children") String children, @RequestParam("flightType") String flightType,
+                                Model model) throws JSONException {
         System.out.println("Getting all Flights");
-        String searchResponse = flightSearchManager.getAllFlights(request);
-        return searchResponse;
+        model.addAttribute("origin", origin);  model.addAttribute("destination", destination);
+        model.addAttribute("originDepartDate", originDepartDate);  model.addAttribute("destinationArrivalDate", destinationArrivalDate);
+        model.addAttribute("adults", adults);  model.addAttribute("infants", infants);
+        model.addAttribute("children", children);  model.addAttribute("flightType", flightType);
+
+        String searchResponse = flightSearchManager.getAllFlights(origin, destination, originDepartDate, destinationArrivalDate, adults, infants, children, flightType);
+        Map<Integer,List<FlightSearchResponse>> flightMap = transformedFlightSearchRes(searchResponse);
+        model.addAttribute("flightResult", flightMap);
+        return "flightSearchResult";
     }
+
+
+
+    private static FlightSearchResponse toEntity(String jsonString)
+    {
+        try{
+            Gson gson = new GsonBuilder().create();
+            FlightSearchResponse flightSearchInfo = gson.fromJson(jsonString, FlightSearchResponse.class);
+            return flightSearchInfo;
+        }
+        catch(JsonSyntaxException ex)
+        {
+            ex.printStackTrace();
+            return null;
+        }
+    }
+
+
+    private static Map<Integer,List<FlightSearchResponse>> transformedFlightSearchRes(String flightSearchResp) throws JSONException {
+        Map<Integer, List<FlightSearchResponse>> searchResults = new LinkedHashMap<>();
+        List<FlightSearchResponse> oneWayFlightList = new LinkedList<>();
+        JSONObject flightSearchResObj =  new JSONObject(flightSearchResp);
+        JSONObject responseObj = flightSearchResObj.getJSONObject("response");
+        JSONArray searchResultArray = responseObj.getJSONArray("search_results");
+        if(searchResultArray.length() > 0){
+            JSONArray onGoingFlightArray = searchResultArray.getJSONArray(0);   // oneWay flights
+            getAllFlights(onGoingFlightArray,oneWayFlightList);
+            searchResults.put(0,oneWayFlightList);
+            if(searchResultArray.length() > 1){    // roundTrip flights
+                List<FlightSearchResponse> returnTripFlightList = new LinkedList<>();
+                JSONArray returnTripFlightArray = searchResultArray.getJSONArray(1);   // ReturnTrip flights
+                getAllFlights(returnTripFlightArray,returnTripFlightList);
+                searchResults.put(1,returnTripFlightList);
+            }
+        }
+        return searchResults;
+    }
+
+    private static void getAllFlights(JSONArray flightJSONArray, List<FlightSearchResponse> flightList) throws JSONException {
+        if(flightJSONArray.length() > 0)
+        {
+            for(int i=0 ; i < flightJSONArray.length() ; i++){
+                try {
+                    flightList.add(toEntity(flightJSONArray.getJSONObject(i).toString()));
+                }catch(Exception e){
+                    System.out.println("Getting Exception in Adding the response");
+                }
+            }
+        }
+
+    }
+
 
     @RequestMapping(value = "/flight/saveFlightSearchResponse", method = RequestMethod.POST)
     public String saveFlightSearchResponse(@RequestParam("origin") String origin, @RequestParam("destination") String destination,
@@ -41,9 +111,9 @@ public class FlightSearchController {
         model.addAttribute("flightNumber", flightNumber);  model.addAttribute("seatRemain", seatRemain);
         model.addAttribute("pricePerAdult", pricePerAdult);  model.addAttribute("pricePerChild", pricePerChild);
         model.addAttribute("pricePerInfant", pricePerInfant);
-        flightSearchManager.saveFlightSearchResponse(getAllFlightDataValues(origin, destination, isRefundable, originDepartDate,
-                originDepartTime, destinationArrivalDate, destinationArrivalTime, flightName, flightNumber,  seatRemain,
-                pricePerAdult, pricePerChild, pricePerInfant));
+        //flightSearchManager.saveFlightSearchResponse(getAllFlightDataValues(origin, destination, isRefundable, originDepartDate,
+           //     originDepartTime, destinationArrivalDate, destinationArrivalTime, flightName, flightNumber,  seatRemain,
+          //      pricePerAdult, pricePerChild, pricePerInfant));
         return "Flight Data saved successfully";
     }
 
